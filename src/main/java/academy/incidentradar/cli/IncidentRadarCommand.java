@@ -1,7 +1,11 @@
 package academy.incidentradar.cli;
 
+import academy.incidentradar.filter.DateFilter;
+import academy.incidentradar.model.LogRecord;
 import academy.incidentradar.model.OutputFormat;
+import academy.incidentradar.parser.LogParser;
 import academy.incidentradar.source.SourceResolver;
+import academy.incidentradar.statistics.Statistics;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -92,22 +96,37 @@ public final class IncidentRadarCommand implements Callable<Integer> {
         paths.addAll(additionalPaths);
 
         List<String> sources = new ArrayList<>();
-
         for (String inputPath : paths) {
             sources.addAll(resolver.resolve(inputPath));
         }
 
         LOG.info("Resolved {} source(s)", sources.size());
 
+        LogParser parser = new LogParser();
+        List<LogRecord> records = new ArrayList<>();
+
         for (String source : sources) {
             try (var reader = resolver.read(source)) {
-                while (reader.readLine() != null) {
-                    // MR1: только проверяем, что источник читается потоково.
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    parser.parseLine(line).ifPresent(records::add);
                 }
             } catch (IOException e) {
                 throw new CliException("Failed to read: " + source, e);
             }
         }
+
+        List<LogRecord> filtered = DateFilter.filter(records, fromDate, toDate);
+        Statistics stats = Statistics.calculate(filtered);
+
+        LOG.info("Total requests: {}", stats.totalRequestsCount());
+        LOG.info("Response codes: {}", stats.responseCodes());
+        LOG.info("Top resources: {}", stats.resources());
+        LOG.info(
+                "Size avg={}, max={}, p95={}",
+                stats.responseSizeInBytes().average(),
+                stats.responseSizeInBytes().max(),
+                stats.responseSizeInBytes().p95());
     }
 
     private void validateOutputPath(OutputFormat format) throws CliException {
