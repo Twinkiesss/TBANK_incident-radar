@@ -1,10 +1,7 @@
 package academy.incidentradar.source;
 
 import academy.incidentradar.cli.CliException;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -42,28 +39,30 @@ public final class SourceResolver {
         return List.of(pathSpec);
     }
 
-    public BufferedReader read(String source) throws CliException {
+    @SuppressWarnings("StreamResourceLeak")
+    public Stream<String> read(String source) throws CliException {
         if (isUrl(source)) {
             return readUrl(source);
         }
         try {
-            return Files.newBufferedReader(Path.of(source), StandardCharsets.UTF_8);
+            return Files.lines(Path.of(source), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new CliException("Cannot read file: " + source, e);
         }
     }
 
-    private BufferedReader readUrl(String url) throws CliException {
+    @SuppressWarnings("StreamResourceLeak")
+    private Stream<String> readUrl(String url) throws CliException {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request =
                 HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
         try {
-            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
             if (response.statusCode() != HTTP_OK) {
-                response.body().close();
+                response.body().close(); // Закрываем стрим при ошибке
                 throw new CliException("URL returned HTTP " + response.statusCode() + ": " + url);
             }
-            return new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
+            return response.body();
         } catch (IOException e) {
             throw new CliException("Cannot read URL: " + url, e);
         } catch (InterruptedException e) {

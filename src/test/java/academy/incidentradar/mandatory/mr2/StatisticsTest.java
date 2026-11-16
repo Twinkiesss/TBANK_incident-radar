@@ -38,7 +38,7 @@ class StatisticsTest {
                 record("/e", 500, 100),
                 record("/f", 500, 100));
 
-        var statistics = Statistics.calculate(records);
+        var statistics = Statistics.calculate(records.stream());
 
         assertEquals(2L, statistics.responseCodes().get(200));
         assertEquals(1L, statistics.responseCodes().get(404));
@@ -56,7 +56,7 @@ class StatisticsTest {
                 record("/b", 200, 100),
                 record("/c", 200, 100));
 
-        var resources = Statistics.calculate(records).resources();
+        var resources = Statistics.calculate(records.stream()).resources();
 
         assertEquals("/a", resources.get(0).resource());
         assertEquals(3L, resources.get(0).count());
@@ -74,7 +74,7 @@ class StatisticsTest {
                 record("/d", 200, 400),
                 record("/e", 200, 500));
 
-        var size = Statistics.calculate(records).responseSizeInBytes();
+        var size = Statistics.calculate(records.stream()).responseSizeInBytes();
 
         assertEquals(300.0, size.average());
         assertEquals(500L, size.max());
@@ -86,7 +86,7 @@ class StatisticsTest {
     void fractionalValuesAreRoundedToTwoDecimals() {
         List<LogRecord> records = List.of(record("/a", 200, 100), record("/b", 200, 101), record("/c", 200, 102));
 
-        var size = Statistics.calculate(records).responseSizeInBytes();
+        var size = Statistics.calculate(records.stream()).responseSizeInBytes();
 
         assertEquals(101.0, size.average());
         assertEquals(102.0, size.p95());
@@ -101,7 +101,7 @@ class StatisticsTest {
             records.add(record("/test", 200, i * 100));
         }
 
-        var size = Statistics.calculate(records).responseSizeInBytes();
+        var size = Statistics.calculate(records.stream()).responseSizeInBytes();
 
         // Nearest Rank: ceil(0.95 * 20) = 19.
         assertEquals(1900.0, size.p95());

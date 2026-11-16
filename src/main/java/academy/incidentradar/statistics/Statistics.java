@@ -3,18 +3,20 @@ package academy.incidentradar.statistics;
 import academy.incidentradar.model.LogRecord;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.TreeMap;
+import java.util.stream.Collector;
+import java.util.stream.Stream;
 
 public final class Statistics {
 
     private static final int TOP_RESOURCES_LIMIT = 10;
     private static final double P95_QUANTILE = 0.95;
     private static final int ROUNDING_SCALE = 2;
-    private static final int FIRST_INDEX = 0;
 
     private final long totalRequestsCount;
     private final Map<Integer, Long> responseCodes;
@@ -32,48 +34,9 @@ public final class Statistics {
         this.responseSizeInBytes = responseSizeInBytes;
     }
 
-    public static Statistics calculate(List<LogRecord> records) {
-        Map<Integer, Long> codes =
-                records.stream().collect(Collectors.groupingBy(LogRecord::status, Collectors.counting()));
-
-        Map<Integer, Long> sortedCodes = new LinkedHashMap<>();
-
-        codes.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> sortedCodes.put(entry.getKey(), entry.getValue()));
-
-        List<ResourceCount> topResources =
-                records.stream()
-                        .collect(Collectors.groupingBy(LogRecord::resource, Collectors.counting()))
-                        .entrySet()
-                        .stream()
-                        .map(entry -> new ResourceCount(entry.getKey(), entry.getValue()))
-                        .sorted(Comparator.comparingLong(ResourceCount::count)
-                                .reversed()
-                                .thenComparing(ResourceCount::resource))
-                        .limit(TOP_RESOURCES_LIMIT)
-                        .toList();
-
-        List<Long> sizes =
-                records.stream().map(LogRecord::bodyBytesSent).sorted().toList();
-
-        ResponseSizeStatistics sizeStatistics;
-
-        if (sizes.isEmpty()) {
-            sizeStatistics = new ResponseSizeStatistics(0.0, 0, 0.0);
-        } else {
-            double average = sizes.stream().mapToLong(Long::longValue).average().orElse(0.0);
-
-            long max = sizes.get(sizes.size() - 1);
-
-            int p95Index = (int) Math.ceil(P95_QUANTILE * sizes.size()) - 1;
-
-            double p95 = sizes.get(Math.max(FIRST_INDEX, p95Index));
-
-            sizeStatistics = new ResponseSizeStatistics(round(average), max, round(p95));
-        }
-
-        return new Statistics(records.size(), sortedCodes, topResources, sizeStatistics);
+    public static Statistics calculate(Stream<LogRecord> records) {
+        return records.collect(
+                Collector.of(Accumulator::new, Accumulator::add, Accumulator::combine, Accumulator::finish));
     }
 
     private static double round(double value) {
@@ -87,14 +50,75 @@ public final class Statistics {
     }
 
     public Map<Integer, Long> responseCodes() {
-        return Map.copyOf(responseCodes);
+        return responseCodes;
     }
 
     public List<ResourceCount> resources() {
-        return List.copyOf(resources);
+        return resources;
     }
 
     public ResponseSizeStatistics responseSizeInBytes() {
         return responseSizeInBytes;
+    }
+
+    private static final class Accumulator {
+
+        private long total;
+        private final Map<Integer, Long> codes = new TreeMap<>();
+        private final Map<String, Long> resourceCounts = new LinkedHashMap<>();
+        private final List<Long> sizes = new ArrayList<>();
+
+        private void add(LogRecord record) {
+            total++;
+            codes.merge(record.status(), 1L, Long::sum);
+            resourceCounts.merge(record.resource(), 1L, Long::sum);
+            sizes.add(record.bodyBytesSent());
+        }
+
+        private Accumulator combine(Accumulator other) {
+            total += other.total;
+
+            other.codes.forEach((code, count) -> codes.merge(code, count, Long::sum));
+
+            other.resourceCounts.forEach((resource, count) -> resourceCounts.merge(resource, count, Long::sum));
+
+            sizes.addAll(other.sizes);
+            return this;
+        }
+
+        private Statistics finish() {
+            List<ResourceCount> topResources = resourceCounts.entrySet().stream()
+                    .map(entry -> new ResourceCount(entry.getKey(), entry.getValue()))
+                    .sorted(Comparator.comparingLong(ResourceCount::count)
+                            .reversed()
+                            .thenComparing(ResourceCount::resource))
+                    .limit(TOP_RESOURCES_LIMIT)
+                    .toList();
+
+            Map<Integer, Long> sortedCodes = new LinkedHashMap<>(codes);
+
+            ResponseSizeStatistics sizeStatistics;
+
+            if (sizes.isEmpty()) {
+                sizeStatistics = new ResponseSizeStatistics(0.0, 0, 0.0);
+            } else {
+                sizes.sort(Long::compareTo);
+
+                double sum = 0.0;
+                for (long size : sizes) {
+                    sum += size;
+                }
+
+                double average = sum / sizes.size();
+                long max = sizes.get(sizes.size() - 1);
+
+                int p95Index = (int) Math.ceil(P95_QUANTILE * sizes.size()) - 1;
+                double p95 = sizes.get(p95Index);
+
+                sizeStatistics = new ResponseSizeStatistics(round(average), max, round(p95));
+            }
+
+            return new Statistics(total, sortedCodes, topResources, sizeStatistics);
+        }
     }
 }
