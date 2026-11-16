@@ -1,8 +1,10 @@
 package academy.incidentradar.cli;
 
+import academy.incidentradar.filter.DateFilter;
 import academy.incidentradar.model.OutputFormat;
+import academy.incidentradar.parser.LogParser;
 import academy.incidentradar.source.SourceResolver;
-import java.io.IOException;
+import academy.incidentradar.statistics.Statistics;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -11,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Callable;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +76,7 @@ public final class IncidentRadarCommand implements Callable<Integer> {
         }
     }
 
+    @SuppressWarnings("checkstyle:IllegalCatch")
     private void run() throws CliException {
         String pathValue = requireNonNull(path, "--path");
         OutputFormat format = OutputFormat.parse(requireNonNull(outputFormat, "--output-format"));
@@ -86,27 +90,46 @@ public final class IncidentRadarCommand implements Callable<Integer> {
         validateOutputPath(format);
 
         SourceResolver resolver = new SourceResolver();
-
         List<String> paths = new ArrayList<>();
         paths.add(pathValue);
         paths.addAll(additionalPaths);
 
         List<String> sources = new ArrayList<>();
-
         for (String inputPath : paths) {
             sources.addAll(resolver.resolve(inputPath));
         }
 
         LOG.info("Resolved {} source(s)", sources.size());
 
-        for (String source : sources) {
-            try (var reader = resolver.read(source)) {
-                while (reader.readLine() != null) {
-                    // MR1: только проверяем, что источник читается потоково.
-                }
-            } catch (IOException e) {
-                throw new CliException("Failed to read: " + source, e);
+        LogParser parser = new LogParser();
+
+        Stream<String> linesStream = sources.stream().flatMap(source -> {
+            try {
+                return resolver.read(source);
+            } catch (CliException e) {
+                throw new RuntimeException(e);
             }
+        });
+
+        try (linesStream) {
+            Statistics stats = Statistics.calculate(linesStream
+                    .map(parser::parseLine)
+                    .flatMap(java.util.Optional::stream)
+                    .filter(DateFilter.inRange(fromDate, toDate)));
+
+            LOG.info("Total requests: {}", stats.totalRequestsCount());
+            LOG.info("Response codes: {}", stats.responseCodes());
+            LOG.info("Top resources: {}", stats.resources());
+            LOG.info(
+                    "Size avg={}, max={}, p95={}",
+                    stats.responseSizeInBytes().average(),
+                    stats.responseSizeInBytes().max(),
+                    stats.responseSizeInBytes().p95());
+        } catch (RuntimeException e) {
+            if (e.getCause() instanceof CliException ce) {
+                throw ce;
+            }
+            throw e;
         }
     }
 
