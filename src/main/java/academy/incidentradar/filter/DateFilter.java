@@ -10,13 +10,13 @@ public final class DateFilter {
     private DateFilter() {}
 
     public static Predicate<LogRecord> inRange(@Nullable LocalDate from, @Nullable LocalDate to) {
-        if (from != null && to != null && !from.isBefore(to)) {
-            throw new IllegalArgumentException("--from must be earlier than --to");
-        }
+
         return record -> {
             LocalDate date = record.timestamp().toLocalDate();
+
             boolean afterFrom = from == null || !date.isBefore(from);
             boolean beforeTo = to == null || !date.isAfter(to);
+
             return afterFrom && beforeTo;
         };
     }

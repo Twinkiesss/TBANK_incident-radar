@@ -6,9 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import academy.incidentradar.model.LogRecord;
 import academy.incidentradar.parser.LogParser;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.Resources;
 
 @DisplayName("MR2. Парсер строки лога")
 class LogParsingTest {
@@ -27,6 +32,7 @@ class LogParsingTest {
         assertTrue(result.isPresent());
 
         LogRecord record = result.get();
+
         assertEquals("93.180.71.3", record.remoteAddress());
         assertEquals(304, record.status());
         assertEquals(0, record.bodyBytesSent());
@@ -44,12 +50,27 @@ class LogParsingTest {
     }
 
     @Test
-    @DisplayName("Битая строка пропускается, программа не падает")
+    @DisplayName("Битая строка пропускается и выводится предупреждение")
+    @ResourceLock(Resources.SYSTEM_ERR)
     void malformedLineIsSkippedWithWarning() {
-        assertDoesNotThrow(() -> {
-            Optional<LogRecord> result = parser.parseLine("this is not a valid log line");
+        ByteArrayOutputStream errorOutput = new ByteArrayOutputStream();
+        PrintStream originalError = System.err;
+
+        try (PrintStream testError = new PrintStream(errorOutput, true, StandardCharsets.UTF_8)) {
+
+            System.setErr(testError);
+
+            Optional<LogRecord> result = assertDoesNotThrow(() -> parser.parseLine("this is not a valid log line"));
 
             assertTrue(result.isEmpty());
-        });
+        } finally {
+            System.setErr(originalError);
+        }
+
+        String errorMessage = errorOutput.toString(StandardCharsets.UTF_8);
+
+        assertTrue(
+                errorMessage.contains("WARN: skipped malformed log line"),
+                "Ожидалось предупреждение о пропуске некорректной строки");
     }
 }

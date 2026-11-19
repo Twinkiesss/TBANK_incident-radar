@@ -12,13 +12,15 @@ import java.util.regex.Pattern;
 
 public class LogParser {
 
-    private static final int REQUEST_GROUP = 5;
+    private static final int REMOTE_ADDRESS_GROUP = 1;
+    private static final int REMOTE_USER_GROUP = 3;
     private static final int TIMESTAMP_GROUP = 4;
+    private static final int REQUEST_GROUP = 5;
     private static final int STATUS_GROUP = 6;
     private static final int BYTES_GROUP = 7;
     private static final int REFERER_GROUP = 8;
     private static final int USER_AGENT_GROUP = 9;
-    private static final int REMOTE_USER_GROUP = 3;
+
     private static final int REQUEST_PARTS_COUNT = 3;
 
     private static final String MISSING_VALUE = "-";
@@ -59,7 +61,7 @@ public class LogParser {
             }
 
             return Optional.of(new LogRecord(
-                    matcher.group(1),
+                    matcher.group(REMOTE_ADDRESS_GROUP),
                     matcher.group(REMOTE_USER_GROUP),
                     timestamp,
                     requestParts[0],

@@ -1,6 +1,6 @@
 package academy.incidentradar.cli;
 
-public final class CliException extends Exception {
+public final class CliException extends RuntimeException {
 
     public CliException(String message) {
         super(message);

@@ -3,6 +3,7 @@ package academy.incidentradar.cli;
 import academy.incidentradar.filter.DateFilter;
 import academy.incidentradar.model.OutputFormat;
 import academy.incidentradar.parser.LogParser;
+import academy.incidentradar.source.SourceReader;
 import academy.incidentradar.source.SourceResolver;
 import academy.incidentradar.statistics.Statistics;
 import java.nio.file.Files;
@@ -12,6 +13,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -67,19 +69,18 @@ public final class IncidentRadarCommand implements Callable<Integer> {
             run();
             return 0;
         } catch (CliException e) {
-            CommandSpec s = spec;
-            if (s == null) {
+            if (spec == null) {
                 LOG.error("CLI error: {}", e.getMessage());
                 return 2;
             }
-            throw new ParameterException(s.commandLine(), e.getMessage(), e);
+            throw new ParameterException(spec.commandLine(), e.getMessage(), e);
         }
     }
 
-    @SuppressWarnings("checkstyle:IllegalCatch")
-    private void run() throws CliException {
+    private void run() {
         String pathValue = requireNonNull(path, "--path");
         OutputFormat format = OutputFormat.parse(requireNonNull(outputFormat, "--output-format"));
+
         LocalDate fromDate = parseDate("--from", from);
         LocalDate toDate = parseDate("--to", to);
 
@@ -90,6 +91,8 @@ public final class IncidentRadarCommand implements Callable<Integer> {
         validateOutputPath(format);
 
         SourceResolver resolver = new SourceResolver();
+        SourceReader reader = new SourceReader();
+
         List<String> paths = new ArrayList<>();
         paths.add(pathValue);
         paths.addAll(additionalPaths);
@@ -103,18 +106,12 @@ public final class IncidentRadarCommand implements Callable<Integer> {
 
         LogParser parser = new LogParser();
 
-        Stream<String> linesStream = sources.stream().flatMap(source -> {
-            try {
-                return resolver.read(source);
-            } catch (CliException e) {
-                throw new RuntimeException(e);
-            }
-        });
+        Stream<String> linesStream = sources.stream().flatMap(reader::read);
 
         try (linesStream) {
             Statistics stats = Statistics.calculate(linesStream
                     .map(parser::parseLine)
-                    .flatMap(java.util.Optional::stream)
+                    .flatMap(Optional::stream)
                     .filter(DateFilter.inRange(fromDate, toDate)));
 
             LOG.info("Total requests: {}", stats.totalRequestsCount());
@@ -125,33 +122,38 @@ public final class IncidentRadarCommand implements Callable<Integer> {
                     stats.responseSizeInBytes().average(),
                     stats.responseSizeInBytes().max(),
                     stats.responseSizeInBytes().p95());
-        } catch (RuntimeException e) {
-            if (e.getCause() instanceof CliException ce) {
-                throw ce;
-            }
-            throw e;
         }
     }
 
-    private void validateOutputPath(OutputFormat format) throws CliException {
+    private void validateOutputPath(OutputFormat format) {
         Path out = outputPath;
         if (out == null) {
             return;
         }
+
         if (Files.exists(out)) {
             throw new CliException("Output file already exists: " + out);
         }
+
         String expected = "." + format.extension();
-        String name = out.getFileName().toString().toLowerCase(Locale.ROOT);
+        Path fileName = out.getFileName();
+
+        if (fileName == null) {
+            throw new CliException("Invalid output file path: " + out);
+        }
+
+        String name = fileName.toString().toLowerCase(Locale.ROOT);
         if (!name.endsWith(expected)) {
             throw new CliException("Output file extension must be " + expected + " for format " + format.name());
         }
     }
 
-    private static @Nullable LocalDate parseDate(String option, @Nullable String value) throws CliException {
+    private static @Nullable LocalDate parseDate(String option, @Nullable String value) {
+
         if (value == null || value.isBlank()) {
             return null;
         }
+
         try {
             return LocalDate.parse(value);
         } catch (DateTimeParseException e) {
@@ -159,10 +161,12 @@ public final class IncidentRadarCommand implements Callable<Integer> {
         }
     }
 
-    private static String requireNonNull(@Nullable String value, String name) throws CliException {
+    private static String requireNonNull(@Nullable String value, String name) {
+
         if (value == null) {
             throw new CliException("Missing required argument: " + name);
         }
+
         return value;
     }
 }
