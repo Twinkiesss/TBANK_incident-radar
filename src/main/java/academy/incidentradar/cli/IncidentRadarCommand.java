@@ -3,6 +3,8 @@ package academy.incidentradar.cli;
 import academy.incidentradar.filter.DateFilter;
 import academy.incidentradar.model.OutputFormat;
 import academy.incidentradar.parser.LogParser;
+import academy.incidentradar.report.ReportGenerator;
+import academy.incidentradar.report.ReportWriter;
 import academy.incidentradar.source.SourceReader;
 import academy.incidentradar.source.SourceResolver;
 import academy.incidentradar.statistics.Statistics;
@@ -54,7 +56,7 @@ public final class IncidentRadarCommand implements Callable<Integer> {
 
     @Option(
             names = {"--output-path", "-o"},
-            description = "Path to write the report.")
+            description = "Path to write the report. If omitted, report is printed to stdout.")
     private @Nullable Path outputPath;
 
     @Option(names = "--from", description = "Start date inclusive (yyyy-MM-dd).")
@@ -105,7 +107,6 @@ public final class IncidentRadarCommand implements Callable<Integer> {
         LOG.info("Resolved {} source(s)", sources.size());
 
         LogParser parser = new LogParser();
-
         Stream<String> linesStream = sources.stream().flatMap(reader::read);
 
         try (linesStream) {
@@ -114,14 +115,16 @@ public final class IncidentRadarCommand implements Callable<Integer> {
                     .flatMap(Optional::stream)
                     .filter(DateFilter.inRange(fromDate, toDate)));
 
+            String report = new ReportGenerator().generate(stats, sources, format);
+
+            if (outputPath == null) {
+                System.out.print(report);
+            } else {
+                new ReportWriter().write(outputPath, report);
+                LOG.info("Report saved to {}", outputPath);
+            }
+
             LOG.info("Total requests: {}", stats.totalRequestsCount());
-            LOG.info("Response codes: {}", stats.responseCodes());
-            LOG.info("Top resources: {}", stats.resources());
-            LOG.info(
-                    "Size avg={}, max={}, p95={}",
-                    stats.responseSizeInBytes().average(),
-                    stats.responseSizeInBytes().max(),
-                    stats.responseSizeInBytes().p95());
         }
     }
 
@@ -149,7 +152,6 @@ public final class IncidentRadarCommand implements Callable<Integer> {
     }
 
     private static @Nullable LocalDate parseDate(String option, @Nullable String value) {
-
         if (value == null || value.isBlank()) {
             return null;
         }
@@ -162,7 +164,6 @@ public final class IncidentRadarCommand implements Callable<Integer> {
     }
 
     private static String requireNonNull(@Nullable String value, String name) {
-
         if (value == null) {
             throw new CliException("Missing required argument: " + name);
         }
